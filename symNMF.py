@@ -193,7 +193,7 @@ def add_reflected_indices(fold):
     return tuple([tuple(idxs1), tuple(idxs2)])
 
 
-def symnmf_xval(nc, x, n_folds=10, n_jobs=-1, random_state=None):
+def symnmf_xval(x, n_folds=10, n_jobs=-1, random_state=None, **nmf_kwargs):
     random_state = check_random_state(random_state)
     n, m = x.shape
     assert n == m, f'x must be symmetric, has shape {x.shape}'
@@ -206,10 +206,11 @@ def symnmf_xval(nc, x, n_folds=10, n_jobs=-1, random_state=None):
     def parallel_nmf_xval(fold):
         x_copy = x.copy()
         x_copy[fold] = np.nan
-        nmf = SymNMF(n_components=nc)
+        nmf = SymNMF(**nmf_kwargs)
         nmf.fit(x_copy)
         pred = np.dot(nmf.U, nmf.V.T)
-        mse = mean_squared_error(x[fold], pred[fold])
+        nonan = ~np.isnan(x[fold])
+        mse = mean_squared_error(x[fold][nonan], pred[fold][nonan])
         return mse
 
     if n_jobs == -1:
@@ -218,21 +219,24 @@ def symnmf_xval(nc, x, n_folds=10, n_jobs=-1, random_state=None):
     return mses
 
 
-def symnmf_xvals(x, ncs, n_folds=10, random_state=None, n_jobs=-1):
+def symnmf_xvals(x, ncs, n_folds=10, n_reps=1, random_state=None, n_jobs=-1):
     random_state = check_random_state(random_state)
     msess = []
     for nc in ncs:
-        try:
-            print(nc)
-            mses = symnmf_xval(nc,
-                               x,
-                               n_folds=n_folds,
-                               n_jobs=n_jobs,
-                               random_state=random_state)
-        except Exception as e:
-            print(nc, e)
-            mses = [np.nan] * n_folds
-        msess.append(mses)
+        print(nc)
+        reps_mses = []
+        for r in range(n_reps):
+            try:
+                mses = symnmf_xval(nc,
+                                   x,
+                                   n_folds=n_folds,
+                                   n_jobs=n_jobs,
+                                   random_state=random_state)
+            except Exception as e:
+                print(nc, e)
+                mses = [np.nan] * n_folds
+            reps_mses.extend(mses)
+        msess.append(reps_mses)
     return msess
 
 
