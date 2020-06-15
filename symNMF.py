@@ -107,7 +107,7 @@ class SymNMF:
     def __init__(self,
                  n_components,
                  max_iter=200,
-                 tol=1E-8,
+                 tol=1E-4,
                  alpha=0,
                  l1_ratio=0.5,
                  random_state=None):
