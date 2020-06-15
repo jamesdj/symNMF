@@ -1,10 +1,12 @@
 import os
 from functools import partial
 from itertools import cycle
+import warnings
 
 import numpy as np
 from sklearn.metrics import mean_squared_error
 from sklearn.utils import check_random_state
+from sklearn.exceptions import ConvergenceWarning
 import numpy.ma as ma
 from scipy.sparse.linalg import svds
 from joblib import Parallel, delayed
@@ -22,7 +24,7 @@ def shuffle_and_deal(cards, n_hands, random_state=None):
     return hands
 
 
-def emsvd(Y, k=None, tol=1E-3, maxiter=None):
+def emsvd(Y, k=None, tol=1E-3, max_iter=None):
     """
     From https://stackoverflow.com/questions/35577553/how-to-fill-nan-values-in-numeric-array-to-apply-svd
 
@@ -33,7 +35,7 @@ def emsvd(Y, k=None, tol=1E-3, maxiter=None):
     Y:          (nobs, ndim) data matrix, missing values denoted by NaN/Inf
     k:          number of singular values/vectors to find (default: k=ndim)
     tol:        convergence tolerance on change in trace norm
-    maxiter:    maximum number of EM steps to perform (default: no limit)
+    max_iter:    maximum number of EM steps to perform (default: no limit)
 
     Returns:
     -----------
@@ -46,8 +48,8 @@ def emsvd(Y, k=None, tol=1E-3, maxiter=None):
         svdmethod = partial(np.linalg.svd, full_matrices=False)
     else:
         svdmethod = partial(svds, k=k)
-    if maxiter is None:
-        maxiter = np.inf
+    if max_iter is None:
+        max_iter = np.inf
     # initialize the missing values to their respective column means
     mu_hat = np.nanmean(Y, axis=0, keepdims=1)
     valid = np.isfinite(Y)
@@ -64,7 +66,7 @@ def emsvd(Y, k=None, tol=1E-3, maxiter=None):
         mu_hat = Y_hat.mean(axis=0, keepdims=1)
         # test convergence using relative change in trace norm
         v = s.sum()
-        if ii >= maxiter or ((v - v_prev) / v_prev) < tol:
+        if ii >= max_iter or ((v - v_prev) / v_prev) < tol:
             halt = True
         ii += 1
         v_prev = v
@@ -104,13 +106,13 @@ class SymNMF:
 
     def __init__(self,
                  n_components,
-                 maxiter=200,
+                 max_iter=200,
                  tol=1E-8,
                  alpha=0,
                  l1_ratio=0.5,
                  random_state=None):
         self.n_components = n_components
-        self.maxiter = maxiter
+        self.max_iter = max_iter
         self.tol = tol
         self.alpha = alpha
         self.l1_ratio = l1_ratio
@@ -120,7 +122,7 @@ class SymNMF:
 
     def fit(self, X, lmda=None):
         U, V = symHALS(X, self.n_components,
-                       maxiter=self.maxiter,
+                       max_iter=self.max_iter,
                        tol=self.tol,
                        lmda=lmda,
                        alpha=self.alpha,
@@ -141,14 +143,15 @@ def kth_diag_indices(a, k):
         return rows, cols
 
 
-def symHALS(Y_orig, J, maxiter=200, tol=1E-8, lmda=None, alpha=0, l1_ratio=0.5, random_state=None):
+def symHALS(Y_orig, J, max_iter=200, tol=1E-4, lmda=None, alpha=0, l1_ratio=0.5, random_state=None):
     l1 = alpha * l1_ratio
     l2 = alpha - l1
     Y = ma.masked_invalid(Y_orig)
     A, B = initialize_UV(Y, J, random_state=random_state)
     if lmda is None:
         lmda = compute_default_lmda(Y, A, B)
-    err = nmf_err(Y, A, B)
+    init_err = nmf_err(Y, A, B)
+    err = float(init_err)
     n_iter = 0
     n, m = Y.shape
     n, J = A.shape
@@ -159,7 +162,7 @@ def symHALS(Y_orig, J, maxiter=200, tol=1E-8, lmda=None, alpha=0, l1_ratio=0.5, 
     S[n - 1, n - 2] = 1
     lmda_i = np.eye(n) * lmda
     Y_plus_lmda_i = Y + lmda_i
-    while n_iter < maxiter:
+    while n_iter < max_iter:
         W = ma.dot(Y_plus_lmda_i.T, A)
         V = ma.dot(A.T, A)
         for j in range(J):
@@ -176,11 +179,15 @@ def symHALS(Y_orig, J, maxiter=200, tol=1E-8, lmda=None, alpha=0, l1_ratio=0.5, 
                        - l1 * np.ones(m)
                        + l2 * ma.dot(S, A[:, j])).clip(0, np.inf) / (Q[j, j] + l2 + lmda)
         new_err = nmf_err(Y, A, B)
-        err_diff = err - new_err
-        err = new_err
-        if err_diff < tol and n_iter > 10:
+        #err_diff = err - new_err
+        #if err_diff < tol:
+        if (err - new_err) / init_err < tol:
             break
+        err = new_err
         n_iter += 1
+    if n_iter == max_iter:
+        warnings.warn("Maximum number of iterations %d reached. Increase it to"
+                      " improve convergence." % max_iter, ConvergenceWarning)
     return A, B
 
 
@@ -219,7 +226,7 @@ def symnmf_xval(x, n_folds=10, n_jobs=-1, random_state=None, **nmf_kwargs):
     return mses
 
 
-def symnmf_xvals(x, ncs, n_folds=10, n_reps=1, random_state=None, n_jobs=-1):
+def symnmf_xval_rank(x, ncs, n_folds=10, n_reps=1, random_state=None, n_jobs=-1, **nmf_kwargs):
     random_state = check_random_state(random_state)
     msess = []
     for nc in ncs:
@@ -227,24 +234,27 @@ def symnmf_xvals(x, ncs, n_folds=10, n_reps=1, random_state=None, n_jobs=-1):
         reps_mses = []
         for r in range(n_reps):
             try:
-                mses = symnmf_xval(nc,
-                                   x,
+                mses = symnmf_xval(x,
                                    n_folds=n_folds,
                                    n_jobs=n_jobs,
-                                   random_state=random_state)
+                                   random_state=random_state,
+                                   n_components=nc,
+                                   **nmf_kwargs)
             except Exception as e:
                 print(nc, e)
+                raise e
                 mses = [np.nan] * n_folds
             reps_mses.extend(mses)
         msess.append(reps_mses)
     return msess
 
 
+
 """
 # https://github.com/kimjingu/nonnegfac-python
 from nonnegfac.nnls import nnlsm_blockpivot
 
-def symANLS(X, r, maxiter=200, tol=1E-8, random_state=None):
+def symANLS(X, r, max_iter=200, tol=1E-8, random_state=None):
     # From Zhu et al. 2018 "Dropping Symmetry for Fast Symmetric Nonnegative Matrix Factorization"
     
     U, V = initialize_UV(X, r, random_state=random_state)
@@ -252,7 +262,7 @@ def symANLS(X, r, maxiter=200, tol=1E-8, random_state=None):
     err = nmf_err(X, U, V)
     n, r = V.shape
     i = 0
-    while i <= maxiter:
+    while i <= max_iter:
         UT, ut_info = nnlsm_blockpivot(np.concatenate([V, np.sqrt(lmda) * np.eye(r)]), 
                               np.concatenate([X.T, np.sqrt(lmda) * V.T]), 
                               False, 
