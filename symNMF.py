@@ -166,16 +166,16 @@ def symHALS(Y_orig, J, max_iter=200, tol=1E-4, lmda=None, alpha=0, l1_ratio=0.5,
         W = ma.dot(Y_plus_lmda_i.T, A)
         V = ma.dot(A.T, A)
         for j in range(J):
-            foo = B[:, j] * V[j, j] + W[:, j] - ma.dot(B, V[:, j])
-            B[:, j] = (foo
+            resid_term = B[:, j] * V[j, j] + W[:, j] - ma.dot(B, V[:, j])
+            B[:, j] = (resid_term
                        - lmda *
                        - l1 * np.ones(m)
                        + l2 * ma.dot(S, B[:, j])).clip(0, np.inf) / (V[j, j] + l2 + lmda)
         P = ma.dot(Y_plus_lmda_i, B)
         Q = ma.dot(B.T, B)
         for j in range(J):
-            bar = A[:, j] * Q[j, j] + P[:, j] - ma.dot(A, Q[:, j])
-            A[:, j] = (bar
+            resid_term = A[:, j] * Q[j, j] + P[:, j] - ma.dot(A, Q[:, j])
+            A[:, j] = (resid_term
                        - l1 * np.ones(m)
                        + l2 * ma.dot(S, A[:, j])).clip(0, np.inf) / (Q[j, j] + l2 + lmda)
         new_err = nmf_err(Y, A, B)
@@ -185,7 +185,6 @@ def symHALS(Y_orig, J, max_iter=200, tol=1E-4, lmda=None, alpha=0, l1_ratio=0.5,
             break
         err = new_err
         n_iter += 1
-    print(n_iter)
     if n_iter == max_iter:
         warnings.warn("Maximum number of iterations %d reached. Increase it to"
                       " improve convergence." % max_iter, ConvergenceWarning)
