@@ -179,9 +179,10 @@ def symHALS(Y_orig, J, max_iter=200, tol=1E-4, lmda=None, alpha=0, l1_ratio=0.5,
                        - l1 * np.ones(m)
                        + l2 * ma.dot(S, A[:, j])).clip(0, np.inf) / (Q[j, j] + l2 + lmda)
         new_err = nmf_err(Y, A, B)
+        #print(new_err, err)
         #err_diff = err - new_err
         #if err_diff < tol:
-        if (err - new_err) / init_err < tol:
+        if 0 <= (err - new_err) / init_err < tol and n_iter > 10:
             break
         err = new_err
         n_iter += 1
