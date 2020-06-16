@@ -185,6 +185,7 @@ def symHALS(Y_orig, J, max_iter=200, tol=1E-4, lmda=None, alpha=0, l1_ratio=0.5,
             break
         err = new_err
         n_iter += 1
+    print(n_iter)
     if n_iter == max_iter:
         warnings.warn("Maximum number of iterations %d reached. Increase it to"
                       " improve convergence." % max_iter, ConvergenceWarning)
