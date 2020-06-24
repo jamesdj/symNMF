@@ -10,6 +10,8 @@ from sklearn.utils import check_random_state
 from sklearn.exceptions import ConvergenceWarning
 from scipy.sparse.linalg import svds
 from joblib import Parallel, delayed
+from bayes_opt import BayesianOptimization
+#from sklearn.gaussian_process.kernels import Matern, WhiteKernel
 
 
 def shuffle_and_deal(cards, n_hands, random_state=None):
@@ -236,17 +238,15 @@ def add_reflected_indices(fold):
     return tuple([tuple(idxs1), tuple(idxs2)])
 
 
-def symnmf_xval(x, n_folds=10, n_jobs=-1, random_state=None, **nmf_kwargs):
+def symnmf_xval(x, n_folds=10, n_jobs=-1, n_reps=1, random_state=None, **nmf_kwargs):
     random_state = check_random_state(random_state)
     n, m = x.shape
     assert n == m, f'x must be symmetric, has shape {x.shape}'
     idxs = list(zip(*np.triu_indices(n)))
-    folds = [tuple(zip(*fold)) for fold in shuffle_and_deal(idxs,
-                                                            n_folds,
-                                                            random_state=random_state)]
-    folds = [add_reflected_indices(fold) for fold in folds]
+    if n_jobs == -1:
+        n_jobs = os.cpu_count()
 
-    def parallel_nmf_xval(fold):
+    def parallel_symnmf_xval(fold):
         x_copy = x.copy()
         x_copy[fold] = np.nan
         nmf = SymNMF(**nmf_kwargs)
@@ -256,31 +256,131 @@ def symnmf_xval(x, n_folds=10, n_jobs=-1, random_state=None, **nmf_kwargs):
         mse = mean_squared_error(x[fold][nonan], pred[fold][nonan])
         return mse
 
-    if n_jobs == -1:
-        n_jobs = os.cpu_count()
-    mses = Parallel(n_jobs=n_jobs)(delayed(parallel_nmf_xval)(fold) for fold in folds)
-    return mses
+    rep_mses = []
+    for _ in range(n_reps):
+        folds = [tuple(zip(*fold)) for fold in shuffle_and_deal(idxs,
+                                                                n_folds,
+                                                                random_state=random_state)]
+        folds = [add_reflected_indices(fold) for fold in folds]
+        fold_mses = Parallel(n_jobs=n_jobs)(delayed(parallel_symnmf_xval)(fold) for fold in folds)
+        rep_mses.append(np.mean(fold_mses))
+    return np.mean(rep_mses)
 
 
 def symnmf_xval_rank(x, ncs, n_folds=10, n_reps=1, random_state=None, n_jobs=-1, **nmf_kwargs):
     random_state = check_random_state(random_state)
-    msess = []
+    mses = []
     for nc in ncs:
-        print(nc)
-        reps_mses = []
-        for r in range(n_reps):
-            try:
-                nmf_kwargs.update({'n_components': nc})
-                mses = symnmf_xval(x,
-                                   n_folds=n_folds,
-                                   n_jobs=n_jobs,
-                                   random_state=random_state,
-                                   **nmf_kwargs)
-            except Exception as e:
-                print(nc, e)
-                raise e
-                mses = [np.nan] * n_folds
-            reps_mses.extend(mses)
-        msess.append(reps_mses)
-    return msess
+        try:
+            nmf_kwargs.update({'n_components': nc})
+            mse = symnmf_xval(x,
+                              n_folds=n_folds,
+                              n_jobs=n_jobs,
+                              n_reps=n_reps,
+                              random_state=random_state,
+                              **nmf_kwargs)
+        except Exception as e:
+            print(nc, e)
+            raise e
+            mse = np.nan
+        mses.append(mse)
+    return mses
 
+
+def estimate_max_l1(x, k, l1_ratio):
+    n, m = x.shape
+    z = np.zeros((n, k))
+    max_err = nmf_err(x, z, z)
+    x_mean = x.mean()
+    expon_mean = np.sqrt(x_mean / k)
+    return max_err / (n * k * expon_mean) / l1_ratio
+
+
+def snmf_xval_neg_mse(x, k, alphae, l1_ratio, n_reps=1, n_folds=10, n_jobs=-1, random_state=None, **nmf_kwargs):
+    alpha = 10 ** alphae
+    nmf_kwargs.update(dict(n_components=int(round(k)), alpha=alpha, l1_ratio=l1_ratio))
+    mse = symnmf_xval(x, n_folds=n_folds, n_jobs=n_jobs, random_state=random_state, **nmf_kwargs)
+    return -1 * mse  # since we'll be maximizing
+
+
+def select_model(x,
+                 k_bounds,
+                 noise_var=None,
+                 # whitekernel=False,
+                 alphae_bounds=None,
+                 l1_ratio_bounds=None,
+                 bounds_eps=1e-3,
+                 init_points=20,
+                 n_iter=100,
+                 n_folds=10,
+                 n_reps=1,
+                 n_jobs=-1,
+                 random_state=None,
+                 n_init_fits=10,
+                 n_final_fits=10,
+                 **nmf_kwargs):
+    if noise_var is None:
+        mid_k = int(round(np.mean(k_bounds)))
+        neg_mses = [snmf_xval_neg_mse(x,
+                                      mid_k,
+                                      0,
+                                      0,
+                                      n_folds=n_folds,
+                                      n_reps=n_reps,
+                                      random_state=random_state,
+                                      n_jobs=n_jobs,
+                                      **nmf_kwargs) for _ in range(n_init_fits)]
+        noise_var = np.std(neg_mses) ** 2
+    if l1_ratio_bounds is None:
+        l1_ratio_bounds = (bounds_eps, 1)
+    if alphae_bounds is None:
+        max_alpha = estimate_max_l1(x, k_bounds[0], l1_ratio_bounds[0])
+        min_alpha = max_alpha * bounds_eps
+        max_alphae = np.log10(max_alpha)
+        min_alphae = np.log10(min_alpha)
+        alphae_bounds = (min_alphae, max_alphae)
+    pbounds = {'k': k_bounds,
+               'alphae': alphae_bounds,
+               'l1_ratio': l1_ratio_bounds}
+
+    optimizer = BayesianOptimization(
+        f=partial(snmf_xval_neg_mse,
+                  x=x,
+                  n_reps=n_reps,
+                  n_folds=n_folds,
+                  n_jobs=n_jobs,
+                  random_state=random_state,
+                  **nmf_kwargs),
+        pbounds=pbounds,
+        random_state=random_state,
+    )
+    """
+    if whitekernel:
+        optimizer.maximize(
+            init_points=init_points,
+            n_iter=n_iter,
+            kernel=Matern(nu=2.5) + WhiteKernel(noise_level=noise_var),
+            # sklearn suggests whitekernel can learn the appropriate noise, but
+            # in practice I have not seen it perform better, and maybe worse
+        )
+    else:
+    """
+    optimizer.maximize(
+        init_points=init_points,
+        n_iter=n_iter,
+        alpha=noise_var,
+    )
+    opt = optimizer.max['params']
+    best_search_neg_mse = optimizer.max['target']
+    # Now fit multiple times and take model with lowest reconstruction error
+    best_model = None
+    best_mse = np.inf
+    for _ in range(n_final_fits):
+        nmf = SymNMF(n_components=int(round(opt['k'])),
+                     alpha=10 ** opt['alphae'],
+                     l1_ratio=opt['l1_ratio']).fit(x)
+        mse = mean_squared_error(x, np.dot(nmf.U, nmf.V.T))
+        if mse < best_mse:
+            best_model = nmf
+            best_mse = mse
+    return best_model, best_search_neg_mse
