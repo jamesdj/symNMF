@@ -10,8 +10,8 @@ from sklearn.utils import check_random_state
 from sklearn.exceptions import ConvergenceWarning
 from scipy.sparse.linalg import svds
 from joblib import Parallel, delayed
-from bayes_opt import BayesianOptimization
-#from sklearn.gaussian_process.kernels import Matern, WhiteKernel
+from bayes_opt import BayesianOptimization #, SequentialDomainReductionTransformer
+from sklearn.gaussian_process.kernels import Matern, WhiteKernel
 
 
 def shuffle_and_deal(cards, n_hands, random_state=None):
@@ -267,10 +267,18 @@ def symnmf_xval(x, n_folds=10, n_jobs=-1, n_reps=1, random_state=None, **nmf_kwa
     return np.mean(rep_mses)
 
 
-def symnmf_xval_rank(x, ncs, n_folds=10, n_reps=1, random_state=None, n_jobs=-1, **nmf_kwargs):
+def symnmf_xval_rank(x, ncs,
+                     n_folds=10,
+                     n_reps=1,
+                     random_state=None,
+                     n_jobs=-1,
+                     verbose=False,
+                     **nmf_kwargs):
     random_state = check_random_state(random_state)
     mses = []
     for nc in ncs:
+        if verbose:
+            print(nc)
         try:
             nmf_kwargs.update({'n_components': nc})
             mse = symnmf_xval(x,
@@ -304,12 +312,17 @@ def snmf_xval_neg_mse(x, k, alphae, l1_ratio, n_reps=1, n_folds=10, n_jobs=-1, r
 
 
 def select_model(x,
-                 k_bounds,
+                 min_rank,
+                 max_rank,
                  noise_var=None,
-                 # whitekernel=False,
-                 alphae_bounds=None,
-                 l1_ratio_bounds=None,
-                 bounds_eps=1e-3,
+                 whitekernel=True,
+                 whitekernel_noise_spread=1E5,
+                 base_kernel=None,
+                 min_l1_ratio=1e-3,
+                 max_l1_ratio=1,
+                 min_alphae=None,
+                 max_alphae=None,
+                 alpha_eps=1E-5,
                  init_points=20,
                  n_iter=100,
                  n_folds=10,
@@ -319,8 +332,9 @@ def select_model(x,
                  n_init_fits=10,
                  n_final_fits=10,
                  **nmf_kwargs):
+    k_bounds = (min_rank, max_rank)
     if noise_var is None:
-        mid_k = int(round(np.mean(k_bounds)))
+        mid_k = int(round(np.mean([k_bounds])))
         neg_mses = [snmf_xval_neg_mse(x,
                                       mid_k,
                                       0,
@@ -331,18 +345,22 @@ def select_model(x,
                                       n_jobs=n_jobs,
                                       **nmf_kwargs) for _ in range(n_init_fits)]
         noise_var = np.std(neg_mses) ** 2
-    if l1_ratio_bounds is None:
-        l1_ratio_bounds = (bounds_eps, 1)
-    if alphae_bounds is None:
+    l1_ratio_bounds = (min_l1_ratio, max_l1_ratio)
+    if max_alphae is None:
         max_alpha = estimate_max_l1(x, k_bounds[0], l1_ratio_bounds[0])
-        min_alpha = max_alpha * bounds_eps
         max_alphae = np.log10(max_alpha)
+    if min_alphae is None:
+        min_alpha = max_alpha * alpha_eps
         min_alphae = np.log10(min_alpha)
-        alphae_bounds = (min_alphae, max_alphae)
+    else:
+        min_alphae = min(min_alphae, max_alphae)
+    alphae_bounds = (min_alphae, max_alphae)
     pbounds = {'k': k_bounds,
                'alphae': alphae_bounds,
                'l1_ratio': l1_ratio_bounds}
 
+    # apparently only in repo, not conda version
+    #bounds_transformer = SequentialDomainReductionTransformer()
     optimizer = BayesianOptimization(
         f=partial(snmf_xval_neg_mse,
                   x=x,
@@ -353,22 +371,18 @@ def select_model(x,
                   **nmf_kwargs),
         pbounds=pbounds,
         random_state=random_state,
+        #bounds_transformer=bounds_transformer,
     )
-    """
+    kernel = Matern(nu=2.5) if base_kernel is None else base_kernel
     if whitekernel:
-        optimizer.maximize(
-            init_points=init_points,
-            n_iter=n_iter,
-            kernel=Matern(nu=2.5) + WhiteKernel(noise_level=noise_var),
-            # sklearn suggests whitekernel can learn the appropriate noise, but
-            # in practice I have not seen it perform better, and maybe worse
-        )
-    else:
-    """
+        kernel = kernel + WhiteKernel(noise_level=noise_var,
+                                      noise_level_bounds=(noise_var / whitekernel_noise_spread,
+                                                          noise_var * whitekernel_noise_spread))
     optimizer.maximize(
         init_points=init_points,
         n_iter=n_iter,
-        alpha=noise_var,
+        kernel=kernel,
+        alpha=(0 if whitekernel else noise_var)
     )
     opt = optimizer.max['params']
     best_search_neg_mse = optimizer.max['target']
