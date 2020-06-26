@@ -296,7 +296,7 @@ def symnmf_xval_rank(x, ncs,
 
 
 def estimate_max_l1(x_orig, k, l1_ratio):
-    if np.any(np.isnan(x)):
+    if np.any(np.isnan(x_orig)):
         nmf = SymNMF(n_components=k).fit(x_orig)
         x = np.dot(nmf.U, nmf.V.T)
     else:
