@@ -398,7 +398,9 @@ def select_model(x,
         nmf = SymNMF(n_components=int(round(opt['k'])),
                      alpha=10 ** opt['alphae'],
                      l1_ratio=opt['l1_ratio']).fit(x)
-        mse = mean_squared_error(x, np.dot(nmf.U, nmf.V.T))
+        nonan = ~np.isnan(x)
+        pred = np.dot(nmf.U, nmf.V.T)
+        mse = mean_squared_error(x[nonan], pred[nonan])
         if mse < best_mse:
             best_model = nmf
             best_mse = mse
