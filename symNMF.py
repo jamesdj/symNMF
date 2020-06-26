@@ -43,7 +43,7 @@ class SymNMF:
                  n_components,
                  max_iter=200,
                  tol=1E-4,
-                 alpha=0,
+                 alpha=0.,
                  l1_ratio=0.5,
                  random_state=None,
                  warm_start_ab=False,
@@ -347,7 +347,12 @@ def select_model(x,
         noise_var = np.std(neg_mses) ** 2
     l1_ratio_bounds = (min_l1_ratio, max_l1_ratio)
     if max_alphae is None:
-        max_alpha = estimate_max_l1(x, k_bounds[0], l1_ratio_bounds[0])
+        if np.any(np.isnan(x)):
+            nmf = SymNMF(n_components=k_bounds[0]).fit(x)
+            x_for_l1_est = np.dot(nmf.U, nmf.V.T)
+        else:
+            x_for_l1_est = x
+        max_alpha = estimate_max_l1(x_for_l1_est, k_bounds[0], l1_ratio_bounds[0])
         max_alphae = np.log10(max_alpha)
     if min_alphae is None:
         min_alpha = max_alpha * alpha_eps
