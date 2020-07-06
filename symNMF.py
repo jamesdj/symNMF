@@ -312,7 +312,7 @@ def estimate_max_l1(x_orig, k, l1_ratio):
 def snmf_xval_neg_mse(x, k, alphae, l1_ratio, n_reps=1, n_folds=10, n_jobs=-1, random_state=None, **nmf_kwargs):
     alpha = 10 ** alphae
     nmf_kwargs.update(dict(n_components=int(round(k)), alpha=alpha, l1_ratio=l1_ratio))
-    mse = symnmf_xval(x, n_folds=n_folds, n_jobs=n_jobs, random_state=random_state, **nmf_kwargs)
+    mse = symnmf_xval(x, n_folds=n_folds, n_jobs=n_jobs, n_reps=n_reps, random_state=random_state, **nmf_kwargs)
     return -1 * mse  # since we'll be maximizing
 
 
