@@ -49,7 +49,7 @@ class SymNMF:
                  warm_start_ab=False,
                  warm_start_lmda=True,
                  outer_max_iter=200,
-                 outer_tol=0.25,
+                 outer_tol=0.1,
                  ):
         self.n_components = n_components
         self.max_iter = max_iter
@@ -186,7 +186,7 @@ def symHALSnan(Y,
                warm_start_ab=False,
                warm_start_lmda=True,
                outer_max_iter=100,
-               outer_tol=0.25,
+               outer_tol=0.1,
                random_state=None,
                **kwargs):
     """
