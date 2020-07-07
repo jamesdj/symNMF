@@ -214,6 +214,7 @@ def symHALSnan(Y,
                    'A': u,
                    'B': v,
                    'random_state': random_state})
+    diff_ratios = []
     while diff_ratio > outer_tol and n_iter < outer_max_iter:
         u, v = symHALS(yhat,
                        J,
@@ -223,6 +224,9 @@ def symHALSnan(Y,
         diff = np.mean((old_vals - new_vals) ** 2)
         orig_diff = np.mean((first_vals - new_vals) ** 2)
         diff_ratio = diff / orig_diff
+        diff_ratios.append(diff_ratio)
+        if len(diff_ratios) > 1 and np.abs(np.diff(np.log10(diff_ratios[-2:])))[0] < 0.25:
+            break
         yhat[nanmask] = new_vals
         old_vals = new_vals
         n_iter += 1
