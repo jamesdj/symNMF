@@ -49,7 +49,7 @@ class SymNMF:
                  warm_start_ab=False,
                  warm_start_lmda=True,
                  outer_max_iter=200,
-                 outer_tol=0.1,
+                 outer_tol=1E-2,
                  ):
         self.n_components = n_components
         self.max_iter = max_iter
@@ -186,7 +186,7 @@ def symHALSnan(Y,
                warm_start_ab=False,
                warm_start_lmda=True,
                outer_max_iter=100,
-               outer_tol=0.1,
+               outer_tol=1E-2,
                random_state=None,
                **kwargs):
     """
@@ -202,7 +202,8 @@ def symHALSnan(Y,
     yhat = Y.copy()
     nanmean = np.nanmean(Y)
     yhat[nanmask] = nanmean
-    old_vals = yhat[nanmask]
+    first_vals = yhat[nanmask]
+    old_vals = first_vals.copy()
     u, v = initialize_UV(yhat, J, random_state=random_state) if (warm_start_ab or warm_start_lmda) else (None, None)
     lmda = compute_default_lmda(yhat, u, v) if warm_start_lmda else None
     if not warm_start_ab:
@@ -212,19 +213,26 @@ def symHALSnan(Y,
                    'A': u,
                    'B': v,
                    'random_state': random_state})
-    nan_diffs = []
+    #nan_diffs = []
     while n_iter < outer_max_iter:
         u, v = symHALS(yhat,
                        J,
                        **kwargs)
         y_nmf = np.dot(u, v.T)
         new_vals = y_nmf[nanmask]
+        """
         nan_diff = mean_squared_error(old_vals, new_vals)
         nan_diffs.append(nan_diff)
         if len(nan_diffs) > 1:
             nan_diff_of_diffs_orders_mag = np.abs(np.diff(np.log10(nan_diffs[-2:])))[0]
             if nan_diff_of_diffs_orders_mag < outer_tol:
                 break
+        """
+        diff = np.mean((old_vals - new_vals) ** 2)
+        orig_diff = np.mean((first_vals - new_vals) ** 2)
+        diff_ratio = diff / orig_diff
+        if diff_ratio < outer_tol:
+            break
         yhat[nanmask] = new_vals
         old_vals = new_vals
         n_iter += 1
