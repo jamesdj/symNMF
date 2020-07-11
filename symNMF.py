@@ -30,16 +30,15 @@ def initialize_UV(X, r, random_state=None):
     n, m = X.shape
     assert n == m, f'X must be symmetric, has shape {X.shape}'
     random_state = check_random_state(random_state)
-    #x_mean = X.mean()
-    #expon_mean = np.sqrt(x_mean / r)
-    #U = random_state.exponential(scale=expon_mean, size=(n, r))
+    x_mean = X.mean()
+    avg = np.sqrt(x_mean / r)
+    U = random_state.exponential(scale=avg, size=(n, r))
     #V = U.copy()
-    #avg = np.sqrt(X.mean() / r)
     #U = avg * random_state.randn(n, r).astype(X.dtype,
     #                                          copy=False)
     #np.abs(U, out=U)
-    w, v = scipy.sparse.linalg.eigsh(X, k=r)
-    U = np.abs(v * np.sqrt(w))
+    #w, v = scipy.sparse.linalg.eigsh(X, k=r)
+    #U = np.abs(v * np.sqrt(w))
     V = U.copy()
     return U, V
 
