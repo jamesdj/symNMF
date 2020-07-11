@@ -213,7 +213,7 @@ def symHALSnan(Y,
                    'A': u,
                    'B': v,
                    'random_state': random_state})
-    #nan_diffs = []
+    scaled_nan_diffs = []
     while n_iter < outer_max_iter:
         u, v = symHALS(yhat,
                        J,
@@ -235,10 +235,16 @@ def symHALSnan(Y,
         if diff_ratio < outer_tol:
             break
         """
-        nan_diff = mean_squared_error(old_vals, new_vals)
-        print(nan_diff)
-        if nan_diff / nanmean < outer_tol:
-            break
+        scaled_nan_diff = mean_squared_error(old_vals, new_vals) / nanmean
+        scaled_nan_diffs.append(scaled_nan_diff)
+        print('snd', scaled_nan_diff)
+        if scaled_nan_diff < outer_tol:
+            #break
+            if len(scaled_nan_diffs) > 1:
+                orders_mag = np.abs(np.diff(np.log10(scaled_nan_diffs[-2:])))[0]
+                print('om', orders_mag)
+                if orders_mag < outer_tol * 5:
+                    break
         yhat[nanmask] = new_vals
         old_vals = new_vals
         n_iter += 1
