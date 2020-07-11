@@ -29,10 +29,15 @@ def shuffle_and_deal(cards, n_hands, random_state=None):
 def initialize_UV(X, r, random_state=None):
     n, m = X.shape
     assert n == m, f'X must be symmetric, has shape {X.shape}'
-    x_mean = X.mean()
     random_state = check_random_state(random_state)
-    expon_mean = np.sqrt(x_mean / r)
-    U = random_state.exponential(scale=expon_mean, size=(n, r))
+    #x_mean = X.mean()
+    #expon_mean = np.sqrt(x_mean / r)
+    #U = random_state.exponential(scale=expon_mean, size=(n, r))
+    #V = U.copy()
+    avg = np.sqrt(X.mean() / r)
+    U = avg * random_state.randn(n, r).astype(X.dtype,
+                                              copy=False)
+    np.abs(U, out=U)
     V = U.copy()
     return U, V
 
