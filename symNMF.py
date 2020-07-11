@@ -49,7 +49,8 @@ class SymNMF:
                  warm_start_ab=False,
                  warm_start_lmda=True,
                  outer_max_iter=200,
-                 outer_tol=1E-2,
+                 outer_tol1=5E-2,
+                 outer_tol2=0.25,
                  ):
         self.n_components = n_components
         self.max_iter = max_iter
@@ -60,7 +61,8 @@ class SymNMF:
         self.warm_start_ab = warm_start_ab
         self.warm_start_lmda = warm_start_lmda
         self.outer_max_iter = outer_max_iter
-        self.outer_tol = outer_tol
+        self.outer_tol1 = outer_tol1
+        self.outer_tol2 = outer_tol2
         self.U = None
         self.V = None
 
@@ -69,7 +71,8 @@ class SymNMF:
                        warm_start_ab=self.warm_start_ab,
                        warm_start_lmda=self.warm_start_lmda,
                        outer_max_iter=self.outer_max_iter,
-                       outer_tol=self.outer_tol) if np.isnan(X).any() else symHALS
+                       outer_tol1=self.outer_tol1,
+                       outer_tol2=self.outer_tol2) if np.isnan(X).any() else symHALS
         U, V = func(X, self.n_components,
                     max_iter=self.max_iter,
                     tol=self.tol,
@@ -185,13 +188,15 @@ def symHALSnan(Y,
                J,
                warm_start_ab=False,
                warm_start_lmda=True,
-               outer_max_iter=100,
-               outer_tol=1E-2,
+               outer_max_iter=20,
+               outer_tol1=5E-2,
+               outer_tol2=0.25,
                random_state=None,
                **kwargs):
     """
     Todo:
     - explore convergence criteria more, make sure it's robust
+    - explore different initializations
     - why are warm starts not faster?
     - quality of solution and similarity of u and v with warm starts, not exact lambda
       - it seems the lambda decreases as we go, so we are ok; the first lambda is larger than we need
@@ -202,8 +207,7 @@ def symHALSnan(Y,
     yhat = Y.copy()
     nanmean = np.nanmean(Y)
     yhat[nanmask] = nanmean
-    first_vals = yhat[nanmask]
-    old_vals = first_vals.copy()
+    old_vals = yhat[nanmask]
     u, v = initialize_UV(yhat, J, random_state=random_state) if (warm_start_ab or warm_start_lmda) else (None, None)
     lmda = compute_default_lmda(yhat, u, v) if warm_start_lmda else None
     if not warm_start_ab:
@@ -220,34 +224,21 @@ def symHALSnan(Y,
                        **kwargs)
         y_nmf = np.dot(u, v.T)
         new_vals = y_nmf[nanmask]
-        """
-        nan_diff = mean_squared_error(old_vals, new_vals)
-        nan_diffs.append(nan_diff)
-        if len(nan_diffs) > 1:
-            nan_diff_of_diffs_orders_mag = np.abs(np.diff(np.log10(nan_diffs[-2:])))[0]
-            if nan_diff_of_diffs_orders_mag < outer_tol:
-                break
-        """
-        """
-        diff = np.mean((old_vals - new_vals) ** 2)
-        orig_diff = np.mean((first_vals - new_vals) ** 2)
-        diff_ratio = diff / orig_diff
-        if diff_ratio < outer_tol:
-            break
-        """
         scaled_nan_diff = mean_squared_error(old_vals, new_vals) / nanmean
         scaled_nan_diffs.append(scaled_nan_diff)
-        print('snd', scaled_nan_diff)
-        if scaled_nan_diff < outer_tol:
-            #break
+        if scaled_nan_diff < outer_tol1:
             if len(scaled_nan_diffs) > 1:
                 orders_mag = np.abs(np.diff(np.log10(scaled_nan_diffs[-2:])))[0]
-                print('om', orders_mag)
-                if orders_mag < outer_tol * 5:
+                if orders_mag < outer_tol2 * 5:
                     break
         yhat[nanmask] = new_vals
         old_vals = new_vals
         n_iter += 1
+    if n_iter == outer_max_iter:
+        warnings.warn("Maximum number of iterations %d reached. Increase it to"
+                      " improve convergence." % outer_max_iter, ConvergenceWarning)
+        print(f'Scaled nan diffs:\n{scaled_nan_diffs}')
+
     return u, v
 
 
