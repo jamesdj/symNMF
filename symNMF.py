@@ -39,7 +39,7 @@ def initialize_UV(X, r, random_state=None):
     #                                          copy=False)
     #np.abs(U, out=U)
     w, v = scipy.sparse.linalg.eigsh(X, k=r)
-    U = np.abs(v / np.sqrt(w))
+    U = np.abs(v * np.sqrt(w))
     V = U.copy()
     return U, V
 
