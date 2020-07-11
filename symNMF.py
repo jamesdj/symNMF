@@ -29,18 +29,55 @@ def shuffle_and_deal(cards, n_hands, random_state=None):
 def initialize_UV(X, r, random_state=None):
     n, m = X.shape
     assert n == m, f'X must be symmetric, has shape {X.shape}'
-    random_state = check_random_state(random_state)
-    x_mean = X.mean()
-    avg = np.sqrt(x_mean / r)
-    U = random_state.exponential(scale=avg, size=(n, r))
+    #random_state = check_random_state(random_state)
+    #x_mean = X.mean()
+    #avg = np.sqrt(x_mean / r)
+    #U = random_state.exponential(scale=avg, size=(n, r))
     #V = U.copy()
     #U = avg * random_state.randn(n, r).astype(X.dtype,
     #                                          copy=False)
     #np.abs(U, out=U)
     #w, v = scipy.sparse.linalg.eigsh(X, k=r)
     #U = np.abs(v * np.sqrt(w))
+    U = sym_nndsvd(X, r)
     V = U.copy()
     return U, V
+
+
+def sym_nndsvd(X, n_components, eps=1e-6):
+    S, U = scipy.sparse.linalg.eigsh(X, k=n_components)
+    W = np.zeros_like(U)
+
+    # The leading singular triplet is non-negative
+    # so it can be used as is for initialization.
+    W[:, 0] = np.sqrt(S[0]) * np.abs(U[:, 0])
+
+    for j in range(1, n_components):
+        x = U[:, j]
+
+        # extract positive and negative parts of column vectors
+        x_p = np.maximum(x, 0)
+        x_n = np.abs(np.minimum(x, 0))
+
+        # and their norms
+        x_p_nrm = scipy.linalg.norm(x_p)
+        x_n_nrm = scipy.linalg.norm(x_n)
+
+        m_p, m_n = x_p_nrm * x_p_nrm, x_n_nrm * x_n_nrm
+
+        # choose update
+        if m_p > m_n:
+            u = x_p / x_p_nrm
+            sigma = m_p
+        else:
+            u = x_n / x_n_nrm
+            sigma = m_n
+
+        lbd = np.sqrt(S[j] * sigma)
+        W[:, j] = lbd * u
+
+    W[W < eps] = 0
+    return W
 
 
 class SymNMF:
