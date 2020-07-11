@@ -228,10 +228,16 @@ def symHALSnan(Y,
             if nan_diff_of_diffs_orders_mag < outer_tol:
                 break
         """
+        """
         diff = np.mean((old_vals - new_vals) ** 2)
         orig_diff = np.mean((first_vals - new_vals) ** 2)
         diff_ratio = diff / orig_diff
         if diff_ratio < outer_tol:
+            break
+        """
+        nan_diff = mean_squared_error(old_vals, new_vals)
+        print(nan_diff)
+        if nan_diff / nanmean < outer_tol:
             break
         yhat[nanmask] = new_vals
         old_vals = new_vals
