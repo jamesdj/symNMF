@@ -7,6 +7,7 @@ import numpy as np
 import scipy
 from sklearn.metrics import mean_squared_error
 from sklearn.utils import check_random_state
+from sklearn.utils.validation import check_non_negative
 from sklearn.exceptions import ConvergenceWarning
 from scipy.sparse.linalg import svds
 from joblib import Parallel, delayed
@@ -26,25 +27,78 @@ def shuffle_and_deal(cards, n_hands, random_state=None):
     return hands
 
 
-def initialize_UV(X, r, random_state=None):
-    n, m = X.shape
-    assert n == m, f'X must be symmetric, has shape {X.shape}'
-    #random_state = check_random_state(random_state)
-    #x_mean = X.mean()
-    #avg = np.sqrt(x_mean / r)
-    #U = random_state.exponential(scale=avg, size=(n, r))
-    #V = U.copy()
-    #U = avg * random_state.randn(n, r).astype(X.dtype,
-    #                                          copy=False)
-    #np.abs(U, out=U)
-    #w, v = scipy.sparse.linalg.eigsh(X, k=r)
-    #U = np.abs(v * np.sqrt(w))
-    U = sym_nndsvd(X, r)
-    V = U.copy()
-    return U, V
+def initialize_UV(X, n_components, init=None, eps=1e-6, random_state=None):
+    """Algorithms for NMF initialization.
+    Computes an initial guess for the non-negative
+    rank k matrix approximation for X: X = W * W.T
+    Parameters
+    ----------
+    X : array-like, shape (n_samples, n_features)
+        The data matrix to be decomposed.
+    n_components : integer
+        The number of components desired in the approximation.
+    init :  None | 'random' | 'nndsvd' | 'nndsvda' | 'nndsvdar'
+        Method used to initialize the procedure.
+        Default: None.
+        Valid options:
+        - None: 'nndsvd' if n_components <= min(n_samples, n_features),
+            otherwise 'random'.
+        - 'random': non-negative random matrices, scaled with:
+            sqrt(X.mean() / n_components)
+        - 'nndsvd': Nonnegative Double Singular Value Decomposition (NNDSVD)
+            initialization (better for sparseness)
+        - 'nndsvda': NNDSVD with zeros filled with the average of X
+            (better when sparsity is not desired)
+        - 'nndsvdar': NNDSVD with zeros filled with small random values
+            (generally faster, less accurate alternative to NNDSVDa
+            for when sparsity is not desired)
+        - 'custom': use custom matrices W and H
+    eps : float
+        Truncate all values less then this in output to zero.
+    random_state : int, RandomState instance, default=None
+        Used when ``init`` == 'nndsvdar' or 'random'. Pass an int for
+        reproducible results across multiple function calls.
+        See :term:`Glossary <random_state>`.
+    Returns
+    -------
+    W : array-like, shape (n_samples, n_components)
+        Initial guesses for solving X ~= WH
 
+    References
+    ----------
+    C. Boutsidis, E. Gallopoulos: SVD based initialization: A head start for
+    nonnegative matrix factorization - Pattern Recognition, 2008
+    http://tinyurl.com/nndsvd
+    """
+    check_non_negative(X, "NMF initialization")
+    n_samples, n_features = X.shape
+    assert n_samples == n_features, f'X must be symmetric, has shape {X.shape}'
 
-def sym_nndsvd(X, n_components, eps=1e-6):
+    if (init is not None and init != 'random'
+            and n_components > min(n_samples, n_features)):
+        raise ValueError("init = '{}' can only be used when "
+                         "n_components <= min(n_samples, n_features)"
+                         .format(init))
+
+    if init is None:
+        if n_components <= min(n_samples, n_features):
+            init = 'nndsvd'
+        else:
+            init = 'random'
+
+    # Random initialization
+    if init == 'random':
+        avg = np.sqrt(X.mean() / n_components)
+        rng = check_random_state(random_state)
+        H = avg * rng.randn(n_components, n_features).astype(X.dtype,
+                                                             copy=False)
+        W = avg * rng.randn(n_samples, n_components).astype(X.dtype,
+                                                            copy=False)
+        np.abs(H, out=H)
+        np.abs(W, out=W)
+        return W, H
+
+    # NNDSVD initialization
     S, U = scipy.sparse.linalg.eigsh(X, k=n_components)
     W = np.zeros_like(U)
 
@@ -77,7 +131,23 @@ def sym_nndsvd(X, n_components, eps=1e-6):
         W[:, j] = lbd * u
 
     W[W < eps] = 0
-    return W
+
+    if init == "nndsvd":
+        pass
+    elif init == "nndsvda":
+        avg = X.mean()
+        W[W == 0] = avg
+    elif init == "nndsvdar":
+        rng = check_random_state(random_state)
+        avg = X.mean()
+        W[W == 0] = abs(avg * rng.randn(len(W[W == 0])) / 100)
+    else:
+        raise ValueError(
+            'Invalid init parameter: got %r instead of one of %r' %
+            (init, (None, 'random', 'nndsvd', 'nndsvda', 'nndsvdar')))
+
+    V = U.copy()
+    return U, V
 
 
 class SymNMF:
