@@ -146,7 +146,7 @@ def initialize_UV(X, n_components, init=None, eps=1e-6, random_state=None):
             'Invalid init parameter: got %r instead of one of %r' %
             (init, (None, 'random', 'nndsvd', 'nndsvda', 'nndsvdar')))
 
-    V = U.copy()
+    V = U.copy().T
     return U, V
 
 
