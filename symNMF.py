@@ -81,7 +81,7 @@ def initialize_UV(X, n_components, init=None, eps=1e-6, random_state=None):
                          .format(init))
 
     if init is None:
-        if n_components <= min(n_samples, n_features):
+        if n_components <= n_samples:
             init = 'nndsvd'
         else:
             init = 'random'
@@ -158,6 +158,7 @@ class SymNMF:
                  tol=1E-4,
                  alpha=0.,
                  l1_ratio=0.5,
+                 init=None,
                  random_state=None,
                  warm_start_ab=False,
                  warm_start_lmda=True,
@@ -170,6 +171,7 @@ class SymNMF:
         self.tol = tol
         self.alpha = alpha
         self.l1_ratio = l1_ratio
+        self.init = init
         self.random_state = check_random_state(random_state)
         self.warm_start_ab = warm_start_ab
         self.warm_start_lmda = warm_start_lmda
@@ -192,7 +194,8 @@ class SymNMF:
                     lmda=lmda,
                     alpha=self.alpha,
                     l1_ratio=self.l1_ratio,
-                    random_state=self.random_state)
+                    random_state=self.random_state,
+                    init=self.init)
         self.U = U
         self.V = V
         return self
@@ -253,16 +256,17 @@ def symHALS(Y,
             lmda=None,
             alpha=0,
             l1_ratio=0.5,
+            init=None,
             random_state=None):
     n, m = Y.shape
     assert n == m, f'Input matrix of dimension {Y.shape} is not square'
     l1 = alpha * l1_ratio
     l2 = alpha - l1
     if A is None or B is None:
-        A, B = initialize_UV(Y, J, random_state=random_state)
+        A, B = initialize_UV(Y, J, init=init, random_state=random_state)
         init_err = nmf_err(Y, A, B)
     else:
-        C, D = initialize_UV(Y, J, random_state=random_state)
+        C, D = initialize_UV(Y, J, init=init, random_state=random_state)
         init_err = nmf_err(Y, C, D)
     if lmda is None:
         lmda = compute_default_lmda(Y, A, B)
@@ -304,6 +308,7 @@ def symHALSnan(Y,
                outer_max_iter=20,
                outer_tol1=5E-2,
                outer_tol2=0.25,
+               init=None,
                random_state=None,
                **kwargs):
     """
@@ -321,7 +326,7 @@ def symHALSnan(Y,
     nanmean = np.nanmean(Y)
     yhat[nanmask] = nanmean
     old_vals = yhat[nanmask]
-    u, v = initialize_UV(yhat, J, random_state=random_state) if (warm_start_ab or warm_start_lmda) else (None, None)
+    u, v = initialize_UV(yhat, J, init=init, random_state=random_state) if (warm_start_ab or warm_start_lmda) else (None, None)
     lmda = compute_default_lmda(yhat, u, v) if warm_start_lmda else None
     if not warm_start_ab:
         u, v = None, None
@@ -334,6 +339,7 @@ def symHALSnan(Y,
     while n_iter < outer_max_iter:
         u, v = symHALS(yhat,
                        J,
+                       init=init,
                        **kwargs)
         y_nmf = np.dot(u, v.T)
         new_vals = y_nmf[nanmask]
