@@ -90,64 +90,60 @@ def initialize_UV(X, n_components, init=None, eps=1e-6, random_state=None):
     if init == 'random':
         avg = np.sqrt(X.mean() / n_components)
         rng = check_random_state(random_state)
-        H = avg * rng.randn(n_components, n_features).astype(X.dtype,
-                                                             copy=False)
         W = avg * rng.randn(n_samples, n_components).astype(X.dtype,
                                                             copy=False)
-        np.abs(H, out=H)
         np.abs(W, out=W)
-        return W, H
-
-    # NNDSVD initialization
-    S, U = scipy.sparse.linalg.eigsh(X, k=n_components)
-    W = np.zeros_like(U)
-
-    # The leading singular triplet is non-negative
-    # so it can be used as is for initialization.
-    W[:, 0] = np.sqrt(S[0]) * np.abs(U[:, 0])
-
-    for j in range(1, n_components):
-        x = U[:, j]
-
-        # extract positive and negative parts of column vectors
-        x_p = np.maximum(x, 0)
-        x_n = np.abs(np.minimum(x, 0))
-
-        # and their norms
-        x_p_nrm = scipy.linalg.norm(x_p)
-        x_n_nrm = scipy.linalg.norm(x_n)
-
-        m_p, m_n = x_p_nrm * x_p_nrm, x_n_nrm * x_n_nrm
-
-        # choose update
-        if m_p > m_n:
-            u = x_p / x_p_nrm
-            sigma = m_p
-        else:
-            u = x_n / x_n_nrm
-            sigma = m_n
-
-        lbd = np.sqrt(S[j] * sigma)
-        W[:, j] = lbd * u
-
-    W[W < eps] = 0
-
-    if init == "nndsvd":
-        pass
-    elif init == "nndsvda":
-        avg = X.mean()
-        W[W == 0] = avg
-    elif init == "nndsvdar":
-        rng = check_random_state(random_state)
-        avg = X.mean()
-        W[W == 0] = abs(avg * rng.randn(len(W[W == 0])) / 100)
     else:
-        raise ValueError(
-            'Invalid init parameter: got %r instead of one of %r' %
-            (init, (None, 'random', 'nndsvd', 'nndsvda', 'nndsvdar')))
 
-    V = U.copy()
-    return U, V
+        # NNDSVD initialization
+        S, U = scipy.sparse.linalg.eigsh(X, k=n_components)
+        W = np.zeros_like(U)
+
+        # The leading singular triplet is non-negative
+        # so it can be used as is for initialization.
+        W[:, 0] = np.sqrt(S[0]) * np.abs(U[:, 0])
+
+        for j in range(1, n_components):
+            x = U[:, j]
+
+            # extract positive and negative parts of column vectors
+            x_p = np.maximum(x, 0)
+            x_n = np.abs(np.minimum(x, 0))
+
+            # and their norms
+            x_p_nrm = scipy.linalg.norm(x_p)
+            x_n_nrm = scipy.linalg.norm(x_n)
+
+            m_p, m_n = x_p_nrm * x_p_nrm, x_n_nrm * x_n_nrm
+
+            # choose update
+            if m_p > m_n:
+                u = x_p / x_p_nrm
+                sigma = m_p
+            else:
+                u = x_n / x_n_nrm
+                sigma = m_n
+
+            lbd = np.sqrt(S[j] * sigma)
+            W[:, j] = lbd * u
+
+        W[W < eps] = 0
+
+        if init == "nndsvd":
+            pass
+        elif init == "nndsvda":
+            avg = X.mean()
+            W[W == 0] = avg
+        elif init == "nndsvdar":
+            rng = check_random_state(random_state)
+            avg = X.mean()
+            W[W == 0] = abs(avg * rng.randn(len(W[W == 0])) / 100)
+        else:
+            raise ValueError(
+                'Invalid init parameter: got %r instead of one of %r' %
+                (init, (None, 'random', 'nndsvd', 'nndsvda', 'nndsvdar')))
+    H = W.copy()
+    return W, H
 
 
 class SymNMF:
