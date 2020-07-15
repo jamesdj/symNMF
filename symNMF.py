@@ -103,7 +103,7 @@ def initialize_UV(X, n_components, init=None, eps=1e-6, random_state=None):
                                          k=n_components,
                                          which='LM',
                                          return_eigenvectors=True)
-        S = S.abs()
+        S = np.abs(S)
         W = np.zeros_like(U)
 
         # The leading singular triplet is non-negative
