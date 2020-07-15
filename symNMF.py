@@ -96,7 +96,14 @@ def initialize_UV(X, n_components, init=None, eps=1e-6, random_state=None):
     else:
 
         # NNDSVD initialization
-        S, U = scipy.sparse.linalg.eigsh(X, k=n_components)
+        # If A is a symmetric matrix, the singular values are the absolute
+        # values of the eigenvalues of A and the columns of U=V are the
+        # eigenvectors of A
+        S, U = scipy.sparse.linalg.eigsh(X,
+                                         k=n_components,
+                                         which='LM',
+                                         return_eigenvectors=True)
+        S = S.abs()
         W = np.zeros_like(U)
 
         # The leading singular triplet is non-negative
