@@ -103,6 +103,9 @@ def initialize_UV(X, n_components, init=None, eps=1e-6, random_state=None):
                                          k=n_components,
                                          which='LM',
                                          return_eigenvectors=True)
+        sort_idxs = np.argsort(S)[::-1]
+        S = S[sort_idxs]
+        U = U[:, sort_idxs]
         S = np.abs(S)
         W = np.zeros_like(U)
 
