@@ -448,10 +448,10 @@ def select_model(mean_x,
                  n_jobs=1,
                  random_state=None,
                  **nmf_kwargs):
-    nc_bounds = (min_rank, max_rank)
+    rank_bounds = (min_rank, max_rank)
     l1_ratio_bounds = (min_l1_ratio, max_l1_ratio)
     if max_alphae is None:
-        max_alpha = estimate_max_l1(mean_x, nc_bounds[0], l1_ratio_bounds[0])
+        max_alpha = estimate_max_l1(mean_x, rank_bounds[0], l1_ratio_bounds[0])
         max_alphae = np.log10(max_alpha)
     if min_alphae is None:
         min_alpha = max_alphae * alpha_eps
@@ -459,7 +459,7 @@ def select_model(mean_x,
     else:
         min_alphae = min(min_alphae, max_alphae)
     alphae_bounds = (min_alphae, max_alphae)
-    pbounds = {'n_components': nc_bounds,
+    pbounds = {'n_components': rank_bounds,
                'alphae': alphae_bounds,
                'l1_ratio': l1_ratio_bounds}
     optimizer = BayesianOptimization(
