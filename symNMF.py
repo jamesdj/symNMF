@@ -1,7 +1,8 @@
-import os
 from itertools import cycle
 import warnings
 from functools import partial
+import itertools
+import multiprocessing
 
 import numpy as np
 import scipy
@@ -11,8 +12,7 @@ from sklearn.utils.validation import check_non_negative
 from sklearn.exceptions import ConvergenceWarning
 from scipy.sparse.linalg import svds
 from joblib import Parallel, delayed
-from bayes_opt import BayesianOptimization #, SequentialDomainReductionTransformer
-from sklearn.gaussian_process.kernels import Matern, WhiteKernel
+from bayes_opt import BayesianOptimization
 
 
 def shuffle_and_deal(cards, n_hands, random_state=None):
@@ -381,3 +381,104 @@ def estimate_max_l1(x_orig, k, l1_ratio):
     x_mean = x.mean()
     expon_mean = np.sqrt(x_mean / k)
     return max_err / (n * k * expon_mean) / l1_ratio
+
+
+def multigen(gen_func):
+    # from https://stackoverflow.com/questions/1376438/how-to-make-a-repeating-generator-in-python
+    class _multigen(object):
+        def __init__(self, *args, **kwargs):
+            self.__args = args
+            self.__kwargs = kwargs
+
+        def __iter__(self):
+            return gen_func(*self.__args, **self.__kwargs)
+    return _multigen
+
+
+@multigen
+def repeat_replicate_pair_generator(reps):
+    return itertools.permutations(reps, 2)
+
+
+def symnmf_xval_neg_mse(train_test_gen,
+                        n_components,
+                        alphae,
+                        l1_ratio,
+                        n_jobs=1,
+                        random_state=None,
+                        **nmf_kwargs):
+    alpha = 10 ** alphae
+    nmf_kwargs.update(dict(n_components=int(round(n_components)),
+                           alpha=alpha,
+                           l1_ratio=l1_ratio))
+    mse = symnmf_xval(train_test_gen,
+                      n_jobs=n_jobs,
+                      random_state=random_state,
+                      **nmf_kwargs)
+    return -1 * mse  # since we'll be maximizing
+
+
+def symnmf_xval(train_test_gen, n_jobs=1, **nmf_kwargs):
+    def _parallel_split_mse(train, test):
+        nmf = SymNMF(**nmf_kwargs).fit(train)
+        recons = np.dot(nmf.U, nmf.V.T)
+        nonan = ~np.isnan(test)
+        mse = mean_squared_error(recons[nonan], test[nonan])
+        return mse
+    if n_jobs == 1:
+        mses = [_parallel_split_mse(train, test) for train, test in train_test_gen]
+    else:
+        if n_jobs is None:
+            n_jobs = multiprocessing.cpu_count()
+        mses = Parallel(n_jobs=n_jobs)(delayed(_parallel_split_mse)(train, test) for train, test in train_test_gen)
+    return np.mean(mses)
+
+
+def select_model(mean_x,
+                 train_test_gen,
+                 min_rank,
+                 max_rank,
+                 min_l1_ratio=1e-3,
+                 max_l1_ratio=1,
+                 min_alphae=None,
+                 max_alphae=None,
+                 alpha_eps=1E-5,
+                 init_points=20,
+                 n_iter=100,
+                 n_jobs=1,
+                 random_state=None,
+                 **nmf_kwargs):
+    nc_bounds = (min_rank, max_rank)
+    l1_ratio_bounds = (min_l1_ratio, max_l1_ratio)
+    if max_alphae is None:
+        max_alpha = estimate_max_l1(mean_x, nc_bounds[0], l1_ratio_bounds[0])
+        max_alphae = np.log10(max_alpha)
+    if min_alphae is None:
+        min_alpha = max_alphae * alpha_eps
+        min_alphae = np.log10(min_alpha)
+    else:
+        min_alphae = min(min_alphae, max_alphae)
+    alphae_bounds = (min_alphae, max_alphae)
+    pbounds = {'n_components': nc_bounds,
+               'alphae': alphae_bounds,
+               'l1_ratio': l1_ratio_bounds}
+    optimizer = BayesianOptimization(
+        f=partial(symnmf_xval_neg_mse,
+                  train_test_gen=train_test_gen,
+                  n_jobs=n_jobs,
+                  random_state=random_state,
+                  **nmf_kwargs),
+        pbounds=pbounds,
+        random_state=random_state,
+    )
+    optimizer.maximize(
+        init_points=init_points,
+        n_iter=n_iter,
+    )
+    opt = optimizer.max['params']
+    best_search_neg_mse = optimizer.max['target']
+    best_model = SymNMF(n_components=int(round(opt['n_components'])),
+                        alpha=10 ** opt['alphae'],
+                        l1_ratio=opt['l1_ratio'],
+                        **nmf_kwargs).fit(mean_x)
+    return best_model, best_search_neg_mse
